@@ -33,13 +33,14 @@ class OKEventHandler {
     /**
      * 注册的观察者
      */
-    private Map<IOKEvent,OKRegister> mRegisterMap = new ConcurrentHashMap<>();
+    private Map<IOKEvent, OKRegister> mRegisterMap = new ConcurrentHashMap<>();
 
     /**
      * 主线程中的Handler
      */
     private Handler mHandler = new Handler(Looper.getMainLooper());
 
+    private OKCallback mOKCallback;
     /**
      * 来源于AsyncTask
      */
@@ -65,7 +66,7 @@ class OKEventHandler {
     /**
      * 注册观察者
      */
-     void register(IOKEvent subscriber) {
+    void register(IOKEvent subscriber) {
 
         if (mRegisterMap.containsKey(subscriber)) {
             return;
@@ -74,19 +75,20 @@ class OKEventHandler {
         OKRegister okRegister = new OKRegister();
         okRegister.isRegister = true;
         okRegister.interfaceList = OKEventUtils.getInterfaces(subscriber);
-        mRegisterMap.put(subscriber,okRegister);
+        mRegisterMap.put(subscriber, okRegister);
     }
 
     /**
      * 取消观察者
      */
-    void unRegister(IOKEvent register){
+    void unRegister(IOKEvent register) {
         OKRegister remove = mRegisterMap.remove(register);
         remove.isRegister = false;
     }
 
     /**
      * 使用动态代理实现调用
+     *
      * @param tClass {@link IOKEvent} 的子类
      * @return 注册者的接口代理类
      */
@@ -94,7 +96,7 @@ class OKEventHandler {
     <T extends IOKEvent> T doEvent(final Class<T> tClass) {
         OKEventUtils.validateInterface(tClass);
         IOKEvent iokEventProxy = mIOKEventMapProxy.get(tClass);
-        if (iokEventProxy ==null) {
+        if (iokEventProxy == null) {
             synchronized (IOKEvent.class) {
                 iokEventProxy = (IOKEvent) Proxy.newProxyInstance(tClass.getClassLoader(), new Class[]{tClass}, new InvocationHandler() {
                     @Override
@@ -102,7 +104,10 @@ class OKEventHandler {
                         for (Map.Entry<IOKEvent, OKRegister> entry : mRegisterMap.entrySet()) {
                             OKRegister value = entry.getValue();
                             if (value.interfaceList.contains(tClass)) {
-                               OKEventHandler.this.invoke(entry.getKey(),value,method,args);
+                                if (mOKCallback != null) {
+                                    mOKCallback.doBefore(method, args);
+                                }
+                                OKEventHandler.this.invoke(entry.getKey(), value, method, args);
                             }
                         }
                         return null;
@@ -114,21 +119,24 @@ class OKEventHandler {
         return (T) iokEventProxy;
     }
 
+    public void setOKCallback(OKCallback OKCallback) {
+        this.mOKCallback = OKCallback;
+    }
 
     /**
      * 根据注解确定执行线程
      */
     @SuppressWarnings("unchecked")
-    private<T> void invoke(T subscriber, OKRegister register, Method method, Object[] args) {
+    private <T> void invoke(T subscriber, OKRegister register, Method method, Object[] args) {
         try {
             Map<Method, OKRegister.SubscribeInfo> map = register.methodInfoMap;
-            getSubscribeInfo(map,subscriber,method);
+            getSubscribeInfo(map, subscriber, method);
             OKRegister.SubscribeInfo subscribeInfo = null;
             int threadMode;
-            if (map !=null) {
+            if (map != null) {
                 subscribeInfo = map.get(method);
             }
-            if (subscribeInfo ==null) {
+            if (subscribeInfo == null) {
                 threadMode = OKSubscribe.DEFAULT;
             } else {
                 threadMode = subscribeInfo.threadMode;
@@ -138,16 +146,22 @@ class OKEventHandler {
                 case OKSubscribe.DEFAULT:
                 default:
                     method.invoke(subscriber, args);
+                    if (mOKCallback != null) {
+                        mOKCallback.doAfter(method, args);
+                    }
                     break;
                 case OKSubscribe.MAIN:
                     if (Looper.getMainLooper() == Looper.myLooper()) {
-                      method.invoke(subscriber, args);
+                        method.invoke(subscriber, args);
+                        if (mOKCallback != null) {
+                            mOKCallback.doAfter(method, args);
+                        }
                     } else {
-                        mHandler.post(new InvokeRunnable(subscriber,register, method, args));
+                        mHandler.post(new InvokeRunnable(subscriber, register, method, args,mOKCallback));
                     }
                     break;
                 case OKSubscribe.ASYNC:
-                    THREAD_POOL_EXECUTOR.execute(new InvokeRunnable(subscriber,register, method, args));
+                    THREAD_POOL_EXECUTOR.execute(new InvokeRunnable(subscriber, register, method, args,mOKCallback));
                     break;
             }
         } catch (IllegalAccessException e) {
@@ -164,7 +178,7 @@ class OKEventHandler {
      * @param proxyMethod
      * @return
      */
-    private<T> OKRegister.SubscribeInfo getSubscribeInfo(Map<Method, OKRegister.SubscribeInfo> map,T subscriber,Method proxyMethod ) {
+    private <T> OKRegister.SubscribeInfo getSubscribeInfo(Map<Method, OKRegister.SubscribeInfo> map, T subscriber, Method proxyMethod) {
         OKRegister.SubscribeInfo subscribeInfo = map.get(proxyMethod);
         if (subscribeInfo == null) {
             synchronized (OKRegister.class) {
@@ -201,9 +215,12 @@ class OKEventHandler {
 
         private WeakReference<T> subscriberWeakReference;
 
-         InvokeRunnable(T subscriber,OKRegister register, Method method, Object[] args) {
+        private WeakReference<OKCallback> mCallbackWeakReference;
+
+        InvokeRunnable(T subscriber, OKRegister register, Method method, Object[] args ,OKCallback okCallback) {
             registerWeakReference = new WeakReference<>(register);
             subscriberWeakReference = new WeakReference<>(subscriber);
+            mCallbackWeakReference = new WeakReference<>(okCallback);
             this.method = method;
             this.args = args;
         }
@@ -213,8 +230,12 @@ class OKEventHandler {
             try {
                 OKRegister register = registerWeakReference.get();
                 T iokEvent = subscriberWeakReference.get();
-                if (register != null && register.isRegister &&  iokEvent!=null) {
+                if (register != null && register.isRegister && iokEvent != null) {
                     method.invoke(iokEvent, args);
+                    OKCallback okCallback = mCallbackWeakReference.get();
+                    if ( okCallback!= null) {
+                        okCallback.doAfter(method, args);
+                    }
                 }
             } catch (IllegalAccessException e) {
                 e.printStackTrace();
@@ -223,5 +244,6 @@ class OKEventHandler {
             }
         }
     }
+
 
 }

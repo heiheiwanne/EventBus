@@ -39,6 +39,13 @@ public class OKEventBus {
     }
 
     /**
+     * 设置执行前后的回调，属全局回调，一般用来日志打印等等
+     * @param callBack
+     */
+    public static void setCallBack(OKCallback callBack) {
+        getHandler().setOKCallback(callBack);
+    }
+    /**
      * 获得{@link IOKEvent} 的执行类
      * @param tClass  继承自{@link IOKEvent}的class，名为 {@code *.class}
      */
