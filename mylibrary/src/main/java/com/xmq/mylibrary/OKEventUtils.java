@@ -66,12 +66,15 @@ import java.util.concurrent.ConcurrentHashMap;
      */
     static boolean isExtendsInterface(Class<?> in, Class<?> superClass) {
         Class<?>[] subIns = in.getInterfaces();
+        boolean isImpl = false;
         for (Class<?> subIn : subIns) {
             if (superClass.equals(subIn)) {
                 return true;
+            } else {
+                isImpl = isExtendsInterface(subIn,IOKEvent.class);
             }
         }
-        return false;
+        return isImpl;
     }
 
     /**
