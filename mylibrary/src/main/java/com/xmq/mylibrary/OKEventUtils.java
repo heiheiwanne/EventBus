@@ -45,16 +45,22 @@ import java.util.concurrent.ConcurrentHashMap;
      * @param event
      * @return
      */
-    @SuppressWarnings("unchecked")
     static ArrayList<Class<? extends IOKEvent>> getInterfaces(IOKEvent event) {
-        Class<?>[] interfaces = event.getClass().getInterfaces();
+        Class<?> clazz = event.getClass();
         ArrayList<Class<? extends IOKEvent>> eventClass = new ArrayList<>();
+        getI(clazz, eventClass);
+        return eventClass;
+    }
+    @SuppressWarnings("unchecked")
+    private static void getI(Class<?> clazz, ArrayList<Class<? extends IOKEvent>> eventClass) {
+        Class<?>[] interfaces = clazz.getInterfaces();
         for (Class<?> in : interfaces) {
             if (isExtendsInterface(in, IOKEvent.class)) {
                 eventClass.add((Class<? extends IOKEvent>) in);
+            } else {
+                getI(in, eventClass);
             }
         }
-        return eventClass;
     }
 
 
@@ -66,15 +72,12 @@ import java.util.concurrent.ConcurrentHashMap;
      */
     static boolean isExtendsInterface(Class<?> in, Class<?> superClass) {
         Class<?>[] subIns = in.getInterfaces();
-        boolean isImpl = false;
         for (Class<?> subIn : subIns) {
             if (superClass.equals(subIn)) {
                 return true;
-            } else {
-                isImpl = isExtendsInterface(subIn,IOKEvent.class);
             }
         }
-        return isImpl;
+        return false;
     }
 
     /**
